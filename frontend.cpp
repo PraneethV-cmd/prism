@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-// Lexer 
+// Lexer
 
 // here different notations as ASCII is from [0-255]
 enum Token {
@@ -24,10 +24,10 @@ static double numVal; //value filled in if tok_number
 
 //gettok is a function that returns the next token fron the current standard input
 static int gettok() {
-	static int LastChar = ' ';
+	static int LastChar = ' '
 
 	while (isspace(LastChar)) {
-		LastChar = getchar();	
+		LastChar = getchar();
 	}
 
 	if (isalpha(LastChar)) {
@@ -58,7 +58,7 @@ static int gettok() {
 			} else {
 				hasDigit = true;
 			}
-			
+
 			NumStr += LastChar;
 			LastChar = getchar();
 		}
@@ -142,7 +142,7 @@ public:
 	BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS, std::unique_ptr<ExprAST> RHS) : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
 };
 
-// CallExprAST - expresseion class for function calls 
+// CallExprAST - expresseion class for function calls
 
 class CallExprAST : public ExprAST {
 	std::string Callee;
@@ -152,8 +152,125 @@ public:
 };
 
 
+// PrototypeAST -  class that represents prototype for a function,
+// which captures
+// - name
+// - argument names (thus implicitly the number of arguments the function takes)
 
+class PrototypeAST {
+  std::string Name;
+  std::vector<std::string> Args;
 
+public:
+  PrototypeAST(const std::string &Name, std::vector<std::string> Args) : Name(Name), Args(std::move(Args)) {}
 
+  const std::string &getName() const { return Name; }
 
+};
+
+//FunctionAST is for function definition itself
+class FunctionAST {
+  std::unique_ptr<PrototypeAST> Proto;
+  std::unique_ptr<ExprAST> Body;
+
+public:
+  FunctionAST(std::unique_ptr<PrototypeAST> Proto, std::unique_ptr<ExprAST> Body) : Proto(std::move(Proto)), Body(std::move(Body)) {}
+};
+
+// Parser
+
+static int CurTok;
+static int getNextToken() { return CurTok = gettok(); }
+
+// CurTok/getNextToken -  its a simple token buffer where
+// CurTok is the current token the parser is looking for, getNextToken reads another
+// token from the lexer and updates CurTok with its result
+
+// Binary Operators have their precendence, so we hold the precendence
+// for each binary operator that is defined
+static std::map<char, int> BinopPrecendence;
+
+//now we need to get the precendence of the pending binary operator token,
+static int GetTokPrecedence() {
+  if (!isascii(CurTok)) {
+    return -1;
+  }
+
+  int TokPrec = BinopPrecendence[CurTok];
+  if (TokPrec <= 0) {
+    return -1;
+  }
+
+  return TokPrec;
+}
+
+//LogError* is a helper function for error handling
+std::unique_ptr<ExprAST> LogError(const char *Str) {
+  fprintf(stderr, "error: %s\n", Str);
+  return nullptr;
+}
+
+static std::unique_ptr<PrototypeAST> LogErrorP(const char *Str) {
+  LogError(Str);
+  return nullptr;
+}
+
+static std::unique_ptr<ExprAST> ParseExpression();
+
+//numberexpr ::= number
+static std::unique_ptr<ExprAST> ParseNumberExpr() {
+  auto Result = std::make_unique<NumberExprAST>(NumVal);
+  getNextToken();
+  return std::move(Result);
+}
+
+//parenexpr ::= '(' expression ')'
+static std::unique_ptr<ExprAST> ParseParenExpr() {
+  getNextToken(); //we eat (.
+  auto V = ParseExpression();
+  if (!V) {
+    return nullptr;
+  }
+
+  if (CurTok != ')') {
+    return LogError("expected ')'");
+  }
+  getNextToken(); // eat ).
+  return V;
+}
+
+//identifierExpr ::= identifier | indentifier '(' expression* ')'
+static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
+  std::string IdName = IdentifierStr;
+
+  getNextToken();
+
+  if (CurTok != '(') return std::make_unique<VariableExprAST>(IdName);
+
+  getNextToken();
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  if (CurTok != ')') {
+    while (true) {
+      if (auto Arg = ParseExpression()) Args.push_back(std::move(Arg));
+      else return nullptr;
+
+      if (CurTok == ')') break;
+      if (CurTok != ',') return LogError("Expected ')' or ',' in argument list");
+      getNextToken();
+    }
+  }
+
+  getNextToken();
+  return std::make_unique<CallExprAST>(IdName, std::move(Args));
+}
+
+//primary ::= identifierExpr | numberexpr | parenexpr
+static std::unique_ptr<ExprAST> ParsePrimary() {
+  switch (CurTok) {
+    default: return LogError("unknown token when expecting an expression");
+    case tok_identifier: return ParseIdentifierExpr();
+    case tok_number: return ParseNumberExpr();
+    case '(': return ParseParenExpr();
+  }
+}
 
